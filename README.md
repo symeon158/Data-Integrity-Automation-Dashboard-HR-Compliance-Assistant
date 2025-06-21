@@ -64,7 +64,10 @@ Before automation begins, **Power Query** handles:
 
 ## 📁 Example Output
 - JSON groupings by manager
+- Clean CSV/Excel attachments
+- Structured HTML summaries in emails
 
+<details> <summary>Click to expand Office Script code</summary>
 function main(workbook: ExcelScript.Workbook): string {
   type Cell = string | number | boolean | null;
   interface ManagerGroup {
@@ -212,9 +215,7 @@ function main(workbook: ExcelScript.Workbook): string {
 
   return JSON.stringify(groups);
 }
-
-- Clean CSV/Excel attachments
-- Structured HTML summaries in emails
+</details>
 
 ---
 
