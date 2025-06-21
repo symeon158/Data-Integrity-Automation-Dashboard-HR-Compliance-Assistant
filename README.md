@@ -36,6 +36,13 @@ It then notifies the relevant **company and subsidiary managers** by email with 
   - 📨 Embedded **HTML table** of the data  
 - Automatically stores files in OneDrive
 
+![image](https://github.com/user-attachments/assets/e139a3d7-70ef-4667-9605-045dc5a8dee0)
+![image](https://github.com/user-attachments/assets/fcea4581-721a-4285-ad73-755df05d565c)
+![image](https://github.com/user-attachments/assets/393cae79-2952-424c-be8a-10dd622b7ad3)
+
+
+
+
 ### 🧼 Power Query (Preprocessing)
 Before automation begins, **Power Query** handles:
 - Column renaming and unification
