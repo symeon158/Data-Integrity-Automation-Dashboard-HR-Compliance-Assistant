@@ -63,11 +63,14 @@ Before automation begins, **Power Query** handles:
 ---
 
 ## 📁 Example Output
-- JSON groupings by manager
-- Clean CSV/Excel attachments
-- Structured HTML summaries in emails
+- JSON groupings by manager  
+- Clean CSV/Excel attachments  
+- Structured HTML summaries in emails  
 
-<details> <summary>Click to expand Office Script code</summary>
+<details>
+<summary>Click to expand Office Script code</summary>
+
+```ts
 function main(workbook: ExcelScript.Workbook): string {
   type Cell = string | number | boolean | null;
   interface ManagerGroup {
@@ -105,7 +108,6 @@ function main(workbook: ExcelScript.Workbook): string {
   const colIndex = (name: string) => renamedHeaders.indexOf(name);
   const companyColIndex = colIndex("Company");
 
-  // ─── Load Companies Sheet ──────────
   const companySheet = workbook.getWorksheet("Companies");
   const companyRange = companySheet.getRange("A2:A" + companySheet.getUsedRange().getRowCount());
   const companyValues = companyRange.getValues().flat().map(v => String(v).trim()).filter(v => v !== "");
@@ -116,7 +118,6 @@ function main(workbook: ExcelScript.Workbook): string {
     return allowedCompanies.has(comp);
   });
 
-  // ─── Load Manager Table ────────────
   const mgrTable = workbook.getTable("Table3");
   const mgrHdrs = (mgrTable.getHeaderRowRange().getValues() as string[][])[0].map(h => h.trim());
   const mgrBody = mgrTable.getRangeBetweenHeaderAndTotal().getValues() as string[][];
@@ -139,7 +140,6 @@ function main(workbook: ExcelScript.Workbook): string {
     return [...r, mail] as Cell[];
   });
 
-  // ─── Detect Duplicates ─────────────
   const nameDobSeen = new Map<string, number>();
   outRows.forEach(row => {
     const surname = String(row[colIndex("Surname")] || "").trim();
@@ -149,12 +149,10 @@ function main(workbook: ExcelScript.Workbook): string {
     nameDobSeen.set(key, (nameDobSeen.get(key) || 0) + 1);
   });
 
-  // ─── Group by Manager ──────────────
   const mgrColIdx = outHeaders.indexOf("ManagerEmail");
   const grouping = new Map<string, Record<string, Cell>[]>();
   const dateCols = ["Hire Date", "Retire Date", "Date of Birth"];
   const dateColIndices = dateCols.map(col => outHeaders.indexOf(col));
-
   const importantCols = ["Date of Birth", "Hire Date", "Division", "Department", "City"];
 
   outRows.forEach(row => {
@@ -181,7 +179,6 @@ function main(workbook: ExcelScript.Workbook): string {
     rec["Cond2"] = cond2;
     rec["Cond3"] = cond3;
     rec["ShouldInclude"] = shouldInclude;
-
 
     let reason = "";
     if (cond1) reason += "Missing Retire Cause; ";
@@ -215,8 +212,3 @@ function main(workbook: ExcelScript.Workbook): string {
 
   return JSON.stringify(groups);
 }
-</details>
-
----
-
-> ✨ _“A smart automation system for enforcing data discipline across the HR landscape.”_
