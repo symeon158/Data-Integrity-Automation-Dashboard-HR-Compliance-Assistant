@@ -64,6 +64,155 @@ Before automation begins, **Power Query** handles:
 
 ## 📁 Example Output
 - JSON groupings by manager
+
+function main(workbook: ExcelScript.Workbook): string {
+  type Cell = string | number | boolean | null;
+  interface ManagerGroup {
+    ManagerEmail: string;
+    Records: Record<string, Cell>[];
+  }
+
+  const sheet = workbook.getWorksheet("Fields");
+  const table = sheet.getTables()[0];
+  const headerVals = table.getHeaderRowRange().getValues() as string[][];
+  const dataVals = table.getRangeBetweenHeaderAndTotal().getValues() as Cell[][];
+  const headers = headerVals[0].map(h => h.trim());
+
+  const renameMap: Record<string, string> = {
+    "FEMALE": "Gender",
+    "ΕΥΚΑΡΠΙΑ": "City",
+    "ΑΟΡΙΣΤΟΥ ΧΡΟΝΟΥ": "Employment Relation",
+    "DIVISION": "Division",
+    "WOOD EFFECT": "Department"
+  };
+
+  const renamedHeaders = headers.map((orig, ci) => {
+    for (const key of Object.keys(renameMap)) {
+      if (
+        dataVals.some(row =>
+          row[ci] != null && String(row[ci]).toUpperCase().includes(key)
+        )
+      ) {
+        return renameMap[key];
+      }
+    }
+    return orig;
+  });
+
+  const colIndex = (name: string) => renamedHeaders.indexOf(name);
+  const companyColIndex = colIndex("Company");
+
+  // ─── Load Companies Sheet ──────────
+  const companySheet = workbook.getWorksheet("Companies");
+  const companyRange = companySheet.getRange("A2:A" + companySheet.getUsedRange().getRowCount());
+  const companyValues = companyRange.getValues().flat().map(v => String(v).trim()).filter(v => v !== "");
+  const allowedCompanies = new Set(companyValues);
+
+  const filtered = dataVals.filter(r => {
+    const comp = String(r[companyColIndex] || "").trim();
+    return allowedCompanies.has(comp);
+  });
+
+  // ─── Load Manager Table ────────────
+  const mgrTable = workbook.getTable("Table3");
+  const mgrHdrs = (mgrTable.getHeaderRowRange().getValues() as string[][])[0].map(h => h.trim());
+  const mgrBody = mgrTable.getRangeBetweenHeaderAndTotal().getValues() as string[][];
+
+  const compI = mgrHdrs.indexOf("Company");
+  const emailI = mgrHdrs.indexOf("ManagerEmail");
+  if (compI < 0 || emailI < 0) throw new Error("Table3 must have 'Company' and 'ManagerEmail'");
+
+  const mgrMap = new Map<string, string>();
+  for (const row of mgrBody) {
+    const comp = String(row[compI] || "").trim();
+    const mail = String(row[emailI] || "").trim();
+    if (comp && mail) mgrMap.set(comp, mail);
+  }
+
+  const outHeaders = [...renamedHeaders, "ManagerEmail"];
+  const outRows = filtered.map(r => {
+    const comp = String(r[companyColIndex] || "").trim();
+    const mail = mgrMap.get(comp) || "";
+    return [...r, mail] as Cell[];
+  });
+
+  // ─── Detect Duplicates ─────────────
+  const nameDobSeen = new Map<string, number>();
+  outRows.forEach(row => {
+    const surname = String(row[colIndex("Surname")] || "").trim();
+    const name = String(row[colIndex("Name")] || "").trim();
+    const dob = String(row[colIndex("Date of Birth")] || "").trim();
+    const key = `${surname}|${name}|${dob}`;
+    nameDobSeen.set(key, (nameDobSeen.get(key) || 0) + 1);
+  });
+
+  // ─── Group by Manager ──────────────
+  const mgrColIdx = outHeaders.indexOf("ManagerEmail");
+  const grouping = new Map<string, Record<string, Cell>[]>();
+  const dateCols = ["Hire Date", "Retire Date", "Date of Birth"];
+  const dateColIndices = dateCols.map(col => outHeaders.indexOf(col));
+
+  const importantCols = ["Date of Birth", "Hire Date", "Division", "Department", "City"];
+
+  outRows.forEach(row => {
+    const email = String(row[mgrColIdx] || "").trim() || "NoEmail";
+    const rec: Record<string, Cell> = {};
+
+    const surname = String(row[colIndex("Surname")] || "").trim();
+    const name = String(row[colIndex("Name")] || "").trim();
+    const dob = String(row[colIndex("Date of Birth")] || "").trim();
+    const key = `${surname}|${name}|${dob}`;
+    const isDuplicate = (nameDobSeen.get(key) || 0) > 1;
+
+    const retireDate = row[colIndex("Retire Date")];
+    const retireCause = row[colIndex("Retire Cause")];
+
+    const isBlank = (v: Cell) => v === null || (typeof v === "string" && v.trim() === "");
+
+    const cond1 = !isBlank(retireDate) && isBlank(retireCause);
+    const cond2 = isBlank(retireDate) && importantCols.some(c => isBlank(row[colIndex(c)]));
+    const cond3 = isDuplicate;
+
+    const shouldInclude = cond1 || cond2 || cond3;
+    rec["Cond1"] = cond1;
+    rec["Cond2"] = cond2;
+    rec["Cond3"] = cond3;
+    rec["ShouldInclude"] = shouldInclude;
+
+
+    let reason = "";
+    if (cond1) reason += "Missing Retire Cause; ";
+    if (cond2) reason += "Missing Important Field; ";
+    if (cond3) reason += "Duplicate; ";
+    reason = reason.trim();
+
+    outHeaders.forEach((h, i) => {
+      let val = row[i];
+      if (dateColIndices.includes(i) && typeof val === "number") {
+        const jsDate = new Date(Date.UTC(1899, 11, 30) + val * 86400000);
+        rec[h] = jsDate.toISOString().slice(0, 10);
+      } else {
+        rec[h] = val;
+      }
+    });
+
+    rec["IsDuplicate"] = isDuplicate;
+    rec["ShouldInclude"] = shouldInclude;
+    rec["Reason"] = reason;
+
+    const arr = grouping.get(email) || [];
+    arr.push(rec);
+    grouping.set(email, arr);
+  });
+
+  const groups: ManagerGroup[] = [];
+  grouping.forEach((recs, email) => {
+    groups.push({ ManagerEmail: email, Records: recs });
+  });
+
+  return JSON.stringify(groups);
+}
+
 - Clean CSV/Excel attachments
 - Structured HTML summaries in emails
 
