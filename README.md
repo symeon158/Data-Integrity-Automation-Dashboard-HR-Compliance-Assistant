@@ -36,9 +36,9 @@ It then notifies the relevant **company and subsidiary managers** by email with 
   - 📨 Embedded **HTML table** of the data  
 - Automatically stores files in OneDrive
 
-![image](https://github.com/user-attachments/assets/e139a3d7-70ef-4667-9605-045dc5a8dee0)
-![image](https://github.com/user-attachments/assets/fcea4581-721a-4285-ad73-755df05d565c)
-![image](https://github.com/user-attachments/assets/393cae79-2952-424c-be8a-10dd622b7ad3)
+![image](https://github.com/user-attachments/assets/596579bd-6d78-4b23-95b8-899aa9493b4b)
+![image](https://github.com/user-attachments/assets/09b145dd-ee89-46d2-b4bf-e2c5ac418e54)
+
 
 
 
