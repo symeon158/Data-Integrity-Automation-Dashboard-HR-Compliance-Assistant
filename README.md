@@ -74,8 +74,7 @@ Before automation begins, **Power Query** handles:
 - Clean CSV/Excel attachments  
 - Structured HTML summaries in emails  
 
-<details>
-<summary>Click to expand Office Script code</summary>
+### 📜 Office Script Code
 
 ```ts
 function main(workbook: ExcelScript.Workbook): string {
