@@ -148,22 +148,37 @@ function main(workbook: ExcelScript.Workbook): string {
   });
 
   const nameDobSeen = new Map<string, number>();
+  const managerEmailCounts = new Map<string, Map<string, number>>();
+
+  const mgrColIdx = outHeaders.indexOf("ManagerEmail");
+  const emailColIdx = colIndex("email");
+
   outRows.forEach(row => {
     const surname = String(row[colIndex("Surname")] || "").trim();
     const name = String(row[colIndex("Name")] || "").trim();
     const dob = String(row[colIndex("Date of Birth")] || "").trim();
     const key = `${surname}|${name}|${dob}`;
     nameDobSeen.set(key, (nameDobSeen.get(key) || 0) + 1);
+
+    const personEmail = String(row[emailColIdx] || "").trim().toLowerCase();
+    const manager = String(row[mgrColIdx] || "").trim();
+    if (!managerEmailCounts.has(manager)) {
+      managerEmailCounts.set(manager, new Map());
+    }
+    const mgrMapRef = managerEmailCounts.get(manager)!;
+    if (personEmail !== "" && personEmail !== "null") {
+      mgrMapRef.set(personEmail, (mgrMapRef.get(personEmail) || 0) + 1);
+    }
   });
 
-  const mgrColIdx = outHeaders.indexOf("ManagerEmail");
   const grouping = new Map<string, Record<string, Cell>[]>();
   const dateCols = ["Hire Date", "Retire Date", "Date of Birth"];
   const dateColIndices = dateCols.map(col => outHeaders.indexOf(col));
+
   const importantCols = ["Date of Birth", "Hire Date", "Division", "Department", "City"];
 
   outRows.forEach(row => {
-    const email = String(row[mgrColIdx] || "").trim() || "NoEmail";
+    const managerEmail = String(row[mgrColIdx] || "").trim() || "NoEmail";
     const rec: Record<string, Cell> = {};
 
     const surname = String(row[colIndex("Surname")] || "").trim();
@@ -181,17 +196,29 @@ function main(workbook: ExcelScript.Workbook): string {
     const cond2 = isBlank(retireDate) && importantCols.some(c => isBlank(row[colIndex(c)]));
     const cond3 = isDuplicate;
 
-    const shouldInclude = cond1 || cond2 || cond3;
+    const personEmail = String(row[emailColIdx] || "").trim().toLowerCase();
+    const jobProperty = String(row[colIndex("Job Property")] || "").trim().toUpperCase();
+    const isEmailValid = personEmail !== "" && personEmail !== "null";
+    const mgrMapRef = managerEmailCounts.get(managerEmail);
+    const cond4 = isEmailValid && mgrMapRef && mgrMapRef.get(personEmail)! > 1;
+    const cond5 = jobProperty === "ADMINISTRATIVE" && !isEmailValid;
+
+    const shouldInclude = cond1 || cond2 || cond3 || cond4 || cond5;
+
     rec["Cond1"] = cond1;
     rec["Cond2"] = cond2;
     rec["Cond3"] = cond3;
+    rec["Cond4"] = cond4;
+    rec["Cond5"] = cond5;
     rec["ShouldInclude"] = shouldInclude;
 
     let reason = "";
     if (cond1) reason += "Missing Retire Cause; ";
     if (cond2) reason += "Missing Important Field; ";
-    if (cond3) reason += "Duplicate; ";
-    reason = reason.trim();
+    if (cond3) reason += "Duplicate Name/DOB; ";
+    if (cond4) reason += "Duplicate Email per Manager; ";
+    if (cond5) reason += "Missing Email for ADMINISTRATIVE; ";
+    rec["Reason"] = reason.trim();
 
     outHeaders.forEach((h, i) => {
       let val = row[i];
@@ -203,13 +230,11 @@ function main(workbook: ExcelScript.Workbook): string {
       }
     });
 
-    rec["IsDuplicate"] = isDuplicate;
-    rec["ShouldInclude"] = shouldInclude;
-    rec["Reason"] = reason;
+    rec["IsDuplicate"] = cond3;
 
-    const arr = grouping.get(email) || [];
+    const arr = grouping.get(managerEmail) || [];
     arr.push(rec);
-    grouping.set(email, arr);
+    grouping.set(managerEmail, arr);
   });
 
   const groups: ManagerGroup[] = [];
