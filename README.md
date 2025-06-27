@@ -7,7 +7,7 @@ This project leverages **Office Scripts**, **Power Automate**, and **Power Query
 The solution was designed to **assist HR managers and data owners** in monitoring and improving the quality of employee data. It identifies:
 
 - ✅ Missing or incomplete critical fields  
-- 🧠 Duplicate entries (based on key identifiers like name and date of birth)  
+- 🧠 Duplicate entries (based on key identifiers like name and date of birth, emails)  
 - ⚠️ Inconsistent or incorrect retirement records  
 
 It then notifies the relevant **company and subsidiary managers** by email with detailed reports.
@@ -54,6 +54,7 @@ Before automation begins, **Power Query** handles:
 
 ## ✅ Benefits
 - Ensures **HR data quality and completeness**
+- Categorizes each issue with a clear **Reason** for follow-up
 - Automatically informs the responsible managers
 - Reduces manual review and Excel processing time
 - Fully **scalable and maintainable** for all company entities
@@ -61,18 +62,18 @@ Before automation begins, **Power Query** handles:
 ---
 
 ## 🔧 Technologies Used
-- `Office Scripts (Excel TypeScript API)`  
-- `Power Automate` (Flows, Dynamic Content, HTML email formatting)  
-- `Power Query` (ETL logic, data cleaning)  
-- `Excel Online` (Automated reporting)  
+- `Office Scripts (Excel TypeScript API)` – Dynamic row evaluation with **reason tagging logic**
+- `Power Automate` (Flows, Dynamic Content, HTML email formatting) – Generates and sends tables **including the Reason column**
+- `Power Query` (ETL logic, data cleaning) – Prepares clean data before applying rules
+- `Excel Online` (Automated reporting)
 - `Outlook 365 API` (Email delivery engine)
 
 ---
 
 ## 📁 Example Output
-- JSON groupings by manager  
-- Clean CSV/Excel attachments  
-- Structured HTML summaries in emails  
+- JSON groupings by manager
+- Clean CSV/Excel attachments including the **Reason** column per row
+- Structured HTML summaries in emails, listing employees and their **reason for being flagged**
 
 ### 📜 Office Script Code
 
