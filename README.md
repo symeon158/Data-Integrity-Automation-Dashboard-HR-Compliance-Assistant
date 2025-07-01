@@ -33,7 +33,7 @@ It then notifies the relevant **company and subsidiary managers** by email with 
   - Detected duplicate employee profiles
 - Sends **customized email reports** per manager, including:
   - 📎 Attached `.csv` or `.xlsx` file  
-  - 📨 Embedded **HTML table** of the data  
+  - 📨 Embedded **HTML table** of the data which have problematic records 
 - Automatically stores files in OneDrive
 
 ![image](https://github.com/user-attachments/assets/596579bd-6d78-4b23-95b8-899aa9493b4b)
