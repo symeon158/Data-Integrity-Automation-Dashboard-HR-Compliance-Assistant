@@ -77,9 +77,10 @@ Before automation begins, **Power Query** handles:
 - Clean CSV/Excel attachments including the **Reason** column per row
 - Structured HTML summaries in emails, listing employees and their **reason for being flagged**
 
-![image](https://github.com/user-attachments/assets/49a24172-b17a-4475-8df5-d1b4dfd6b599)
-![image](https://github.com/user-attachments/assets/e7207334-9e65-408f-9955-46977721e5a1)
-<img width="1180" height="313" alt="image" src="https://github.com/user-attachments/assets/95735b86-dbb6-4c70-99df-4a437e5dabaf" />
+<img width="253" height="321" alt="image" src="https://github.com/user-attachments/assets/04ada4ed-150b-44e8-a5a5-bd8e59f6e97d" />
+
+<img width="1193" height="119" alt="image" src="https://github.com/user-attachments/assets/5b888013-7251-4b62-9a44-7da2d19c2c46" />
+
 
 
 
