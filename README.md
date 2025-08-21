@@ -92,6 +92,7 @@ function main(workbook: ExcelScript.Workbook): string {
   type Cell = string | number | boolean | null;
   interface ManagerGroup {
     ManagerEmail: string;
+    ManagerName: string;
     Records: Record<string, Cell>[];
   }
 
@@ -141,20 +142,28 @@ function main(workbook: ExcelScript.Workbook): string {
 
   const compI = mgrHdrs.indexOf("Company");
   const emailI = mgrHdrs.indexOf("ManagerEmail");
-  if (compI < 0 || emailI < 0) throw new Error("Table3 must have 'Company' and 'ManagerEmail'");
+  const nameI = mgrHdrs.indexOf("Name");
+  if (compI < 0 || emailI < 0 || nameI < 0)
+    throw new Error("Table3 must have 'Company', 'ManagerEmail' and 'Name' columns");
 
-  const mgrMap = new Map<string, string>();
+  const mgrMap = new Map<string, { email: string; name: string }>();
   for (const row of mgrBody) {
     const comp = String(row[compI] || "").trim();
     const mail = String(row[emailI] || "").trim();
-    if (comp && mail) mgrMap.set(comp, mail);
+    const managerName = String(row[nameI] || "").trim();
+    if (comp && mail) mgrMap.set(comp, { email: mail, name: managerName });
   }
 
-  const outHeaders = [...renamedHeaders, "ManagerEmail"];
+  const managerNameMap = new Map<string, string>();
+  mgrMap.forEach(info => {
+    if (info.email) managerNameMap.set(info.email, info.name);
+  });
+
+  const outHeaders = [...renamedHeaders, "ManagerEmail", "ManagerName"];
   const outRows = filtered.map(r => {
     const comp = String(r[companyColIndex] || "").trim();
-    const mail = mgrMap.get(comp) || "";
-    return [...r, mail] as Cell[];
+    const info = mgrMap.get(comp) || { email: "", name: "" };
+    return [...r, info.email, info.name] as Cell[];
   });
 
   const nameDobSeen = new Map<string, number>();
@@ -176,7 +185,7 @@ function main(workbook: ExcelScript.Workbook): string {
       managerEmailCounts.set(manager, new Map());
     }
     const mgrMapRef = managerEmailCounts.get(manager)!;
-    if (personEmail !== "" && personEmail !== "null") {
+    if (personEmail && personEmail !== "null") {
       mgrMapRef.set(personEmail, (mgrMapRef.get(personEmail) || 0) + 1);
     }
   });
@@ -185,7 +194,13 @@ function main(workbook: ExcelScript.Workbook): string {
   const dateCols = ["Hire Date", "Retire Date", "Date of Birth"];
   const dateColIndices = dateCols.map(col => outHeaders.indexOf(col));
 
-  const importantCols = ["Date of Birth", "Hire Date", "Division", "Department", "City"];
+  const importantCols = [
+    "Company", "Employee Id", "Surname", "Name", "Gender", "Employment Relation",
+    "Job Property", "Date of Birth", "Hire Date", "Division", "Department",
+    "Job Description", "City", "Supervisor Id", "Supervisor Fullname",
+    "Supervisor Job Position", "Mobile Phone", "email", "Nominal Salary",
+    "Tax No.", "Base Salary"
+  ];
 
   outRows.forEach(row => {
     const managerEmail = String(row[mgrColIdx] || "").trim() || "NoEmail";
@@ -199,11 +214,14 @@ function main(workbook: ExcelScript.Workbook): string {
 
     const retireDate = row[colIndex("Retire Date")];
     const retireCause = row[colIndex("Retire Cause")];
-
     const isBlank = (v: Cell) => v === null || (typeof v === "string" && v.trim() === "");
 
-    const cond1 = !isBlank(retireDate) && isBlank(retireCause);
-    const cond2 = isBlank(retireDate) && importantCols.some(c => isBlank(row[colIndex(c)]));
+    const missingFields = importantCols.filter(c => isBlank(row[colIndex(c)]));
+    const cond1 =
+      (!isBlank(retireDate) && isBlank(retireCause)) ||
+      (isBlank(retireDate) && !isBlank(retireCause));
+
+    const cond2 = isBlank(retireDate) && missingFields.length > 0;
     const cond3 = isDuplicate;
 
     const personEmail = String(row[emailColIdx] || "").trim().toLowerCase();
@@ -221,14 +239,15 @@ function main(workbook: ExcelScript.Workbook): string {
     rec["Cond4"] = cond4;
     rec["Cond5"] = cond5;
     rec["ShouldInclude"] = shouldInclude;
+    rec["MissingFields"] = cond2 ? missingFields.join(", ") : "";
 
-    let reason = "";
-    if (cond1) reason += "Missing Retire Cause; ";
-    if (cond2) reason += "Missing Important Field; ";
-    if (cond3) reason += "Duplicate Name/DOB; ";
-    if (cond4) reason += "Duplicate Email per Manager; ";
-    if (cond5) reason += "Missing Email for ADMINISTRATIVE; ";
-    rec["Reason"] = reason.trim();
+    const reasons: string[] = [];
+    if (cond1) reasons.push("Inconsistent Retire Info (Date/Cause mismatch)");
+    if (cond2) reasons.push("Missing Important Field");
+    if (cond3) reasons.push("Duplicate Name/DOB");
+    if (cond4) reasons.push("Duplicate Email");
+    if (cond5) reasons.push("Missing Email for ADMINISTRATIVE");
+    rec["Reason"] = reasons.join("; ");
 
     outHeaders.forEach((h, i) => {
       let val = row[i];
@@ -240,6 +259,7 @@ function main(workbook: ExcelScript.Workbook): string {
       }
     });
 
+    rec["ManagerName"] = managerNameMap.get(managerEmail) || "";
     rec["IsDuplicate"] = cond3;
 
     const arr = grouping.get(managerEmail) || [];
@@ -249,7 +269,11 @@ function main(workbook: ExcelScript.Workbook): string {
 
   const groups: ManagerGroup[] = [];
   grouping.forEach((recs, email) => {
-    groups.push({ ManagerEmail: email, Records: recs });
+    groups.push({
+      ManagerEmail: email,
+      ManagerName: managerNameMap.get(email) || "",
+      Records: recs
+    });
   });
 
   return JSON.stringify(groups);
