@@ -37,7 +37,8 @@ It then notifies the relevant **company and subsidiary managers** by email with 
 - Automatically stores files in OneDrive
 
 ![image](https://github.com/user-attachments/assets/596579bd-6d78-4b23-95b8-899aa9493b4b)
-![image](https://github.com/user-attachments/assets/09b145dd-ee89-46d2-b4bf-e2c5ac418e54)
+<img width="1197" height="125" alt="image" src="https://github.com/user-attachments/assets/088905df-f237-49e3-92fd-ce91a5cf5255" />
+
 
 
 
