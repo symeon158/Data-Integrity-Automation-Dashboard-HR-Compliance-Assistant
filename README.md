@@ -197,8 +197,7 @@ function main(workbook: ExcelScript.Workbook): string {
   const importantCols = [
     "Company", "Employee Id", "Surname", "Name", "Gender", "Employment Relation",
     "Job Property", "Date of Birth", "Hire Date", "Division", "Department",
-    "Job Description", "City", "Supervisor Id", "Supervisor Fullname",
-    "Supervisor Job Position", "Mobile Phone", "email", "Nominal Salary",
+    "Job Description", "City", "Supervisor Id", "Nominal Salary",
     "Tax No.", "Base Salary"
   ];
 
