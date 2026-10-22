@@ -96,13 +96,54 @@ function main(workbook: ExcelScript.Workbook): string {
     Records: Record<string, Cell>[];
   }
 
-  const isBlank = (v: Cell) => v === null || (typeof v === "string" && v.trim() === "");
+  // ---------- Helpers ----------
+  const isBlank = (v: Cell | undefined): boolean =>
+    v === null || v === undefined || (typeof v === "string" && v.trim() === "");
 
+  const norm = (v: Cell | undefined): string => String(v ?? "").trim();
+
+  const EXCEL_EPOCH = Date.UTC(1899, 11, 30);
+  const DAY_MS = 86400000;
+
+  // Converts an Excel date serial or a text date (yyyy-mm-dd or dd/mm/yyyy) to an Excel serial number
+  const toSerial = (v: Cell | undefined): number | null => {
+    if (typeof v === "number") return v;
+    if (typeof v !== "string") return null;
+    const s = v.trim();
+    if (s === "") return null;
+    let m: RegExpMatchArray | null = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return (Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - EXCEL_EPOCH) / DAY_MS;
+    m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})/);
+    if (m) return (Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1])) - EXCEL_EPOCH) / DAY_MS;
+    return null;
+  };
+
+  const todaySerial: number = Math.floor((Date.now() - EXCEL_EPOCH) / DAY_MS);
+  const yearsBetween = (fromSerial: number, toSerialVal: number): number =>
+    (toSerialVal - fromSerial) / 365.25;
+
+  // Tax No.: keep digits only, restore leading zeros lost when stored as a number
+  const normTaxNo = (v: Cell | undefined): string => {
+    const digits = norm(v).replace(/\D/g, "");
+    if (digits === "") return "";
+    return digits.length < 9 ? ("000000000" + digits).slice(-9) : digits;
+  };
+
+  // Salary: number, or text in 1234.56 / 1234,56 / 1.234,56 formats; NaN if not a number
+  const toNumber = (v: Cell | undefined): number => {
+    if (typeof v === "number") return v;
+    let s = norm(v).replace(/\s/g, "");
+    if (s.indexOf(",") >= 0 && s.indexOf(".") >= 0) s = s.replace(/\./g, "").replace(",", ".");
+    else s = s.replace(",", ".");
+    return s === "" ? NaN : Number(s);
+  };
+
+  // ---------- Read main table ----------
   const sheet = workbook.getWorksheet("Fields");
   const table = sheet.getTables()[0];
   const headerVals = table.getHeaderRowRange().getValues() as string[][];
   const dataVals = table.getRangeBetweenHeaderAndTotal().getValues() as Cell[][];
-  const headers = headerVals[0].map(h => h.trim());
+  const headers: string[] = headerVals[0].map((h: string) => String(h).trim());
 
   const renameMap: Record<string, string> = {
     "FEMALE": "Gender",
@@ -112,7 +153,7 @@ function main(workbook: ExcelScript.Workbook): string {
     "WOOD EFFECT": "Department"
   };
 
-  const renamedHeaders = headers.map((orig, ci) => {
+  const renamedHeaders: string[] = headers.map((orig: string, ci: number) => {
     for (const key of Object.keys(renameMap)) {
       if (dataVals.some(row => row[ci] != null && String(row[ci]).toUpperCase().includes(key))) {
         return renameMap[key];
@@ -121,23 +162,46 @@ function main(workbook: ExcelScript.Workbook): string {
     return orig;
   });
 
-  const colIndex = (name: string) => renamedHeaders.indexOf(name);
-  const companyColIndex = colIndex("Company");
+  const colIndex = (name: string): number => renamedHeaders.indexOf(name);
 
-  // Filter by allowed companies (sheet "Companies", col A)
+  // ---------- Fail loudly if a required column is missing ----------
+  const importantCols = [
+    "Company", "Employee Id", "Surname", "Name", "Gender", "Employment Relation",
+    "Job Property", "Date of Birth", "Hire Date", "Division", "Department",
+    "Job Description", "City", "Supervisor Id", "Nominal Salary",
+    "Tax No.", "Base Salary"
+  ];
+  const otherRequiredCols = ["Retire Date", "Retire Cause", "Active", "Mobile Phone"];
+  const missingCols: string[] = [...importantCols, ...otherRequiredCols].filter(c => colIndex(c) < 0);
+
+  let emailColIdx = colIndex("email");
+  if (emailColIdx < 0) emailColIdx = colIndex("Email");
+  if (emailColIdx < 0) missingCols.push("Email");
+
+  if (missingCols.length > 0) {
+    throw new Error("Missing column(s) in the 'Fields' table: " + missingCols.join(", "));
+  }
+
+  const companyColIndex = colIndex("Company");
+  const empIdIdx = colIndex("Employee Id");
+  const supIdIdx = colIndex("Supervisor Id");
+  const retireIdx = colIndex("Retire Date");
+  const taxIdx = colIndex("Tax No.");
+
+  // ---------- Allowed companies (sheet "Companies", col A) ----------
   const companySheet = workbook.getWorksheet("Companies");
   const companyRange = companySheet.getRange("A2:A" + companySheet.getUsedRange().getRowCount());
-  const companyValues = companyRange.getValues().flat().map(v => String(v).trim()).filter(v => v !== "");
-  const allowedCompanies = new Set(companyValues);
+  const companyValues: string[] = companyRange
+    .getValues()
+    .map((r: (string | number | boolean)[]) => String(r[0]).trim())
+    .filter((v: string) => v !== "");
+  const allowedCompanies = new Set<string>(companyValues);
 
-  const filtered = dataVals.filter(r => {
-    const comp = String(r[companyColIndex] || "").trim();
-    return allowedCompanies.has(comp);
-  });
+  const filtered: Cell[][] = dataVals.filter(r => allowedCompanies.has(norm(r[companyColIndex])));
 
-  // Manager table "Table3": Company | ManagerEmail | Name
+  // ---------- Managers (Table3: Company | ManagerEmail | Name) ----------
   const mgrTable = workbook.getTable("Table3");
-  const mgrHdrs = (mgrTable.getHeaderRowRange().getValues() as string[][])[0].map(h => h.trim());
+  const mgrHdrs: string[] = (mgrTable.getHeaderRowRange().getValues() as string[][])[0].map((h: string) => String(h).trim());
   const mgrBody = mgrTable.getRangeBetweenHeaderAndTotal().getValues() as string[][];
   const compI = mgrHdrs.indexOf("Company");
   const emailI = mgrHdrs.indexOf("ManagerEmail");
@@ -157,41 +221,65 @@ function main(workbook: ExcelScript.Workbook): string {
   const managerNameMap = new Map<string, string>();
   mgrMap.forEach(info => { if (info.email) managerNameMap.set(info.email, info.name); });
 
-  const outHeaders = [...renamedHeaders, "ManagerEmail", "ManagerName"];
-  const outRows = filtered.map(r => {
-    const comp = String(r[companyColIndex] || "").trim();
-    const info = mgrMap.get(comp) || { email: "", name: "" };
+  const outHeaders: string[] = [...renamedHeaders, "ManagerEmail", "ManagerName"];
+  const outRows: Cell[][] = filtered.map(r => {
+    const info = mgrMap.get(norm(r[companyColIndex])) || { email: "", name: "" };
     return [...r, info.email, info.name] as Cell[];
   });
 
-  const nameDobSeen = new Map<string, number>();
-  const managerEmailCounts = new Map<string, Map<string, number>>();
-
   const mgrColIdx = outHeaders.indexOf("ManagerEmail");
 
-  // Email column: support both "email" and "Email"
-  let emailColIdx = colIndex("email");
-  if (emailColIdx < 0) emailColIdx = colIndex("Email");
+  // ---------- Employee lookup for supervisor checks (all companies, incl. not-allowed ones) ----------
+  // value = true if at least one record with that Id is active
+  const empActiveByCompanyId = new Map<string, boolean>();
+  const empActiveById = new Map<string, boolean>();
+  for (const r of dataVals) {
+    const id = norm(r[empIdIdx]);
+    if (id === "") continue;
+    const active = isBlank(r[retireIdx]);
+    const k = norm(r[companyColIndex]) + "|" + id;
+    empActiveByCompanyId.set(k, (empActiveByCompanyId.get(k) || false) || active);
+    empActiveById.set(id, (empActiveById.get(id) || false) || active);
+  }
 
-  // Key for Cond3: duplicates are checked within the same company only
-  const nameDobKey = (row: Cell[]) => {
-    const company = String(row[companyColIndex] || "").trim();
-    const surname = String(row[colIndex("Surname")] || "").trim();
-    const name = String(row[colIndex("Name")] || "").trim();
-    const dob = String(row[colIndex("Date of Birth")] || "").trim();
+  // ---------- Pre-counts ----------
+  const nameDobSeen = new Map<string, number>();
+  const taxSeen = new Map<string, number>();
+  const empIdSeen = new Map<string, number>();
+  const managerEmailCounts = new Map<string, Map<string, number>>();
+
+  // Cond3 key: duplicates within the same company only
+  const nameDobKey = (row: Cell[]): string => {
+    const company = norm(row[companyColIndex]);
+    const surname = norm(row[colIndex("Surname")]);
+    const name = norm(row[colIndex("Name")]);
+    const dob = norm(row[colIndex("Date of Birth")]);
     return `${company}|${surname}|${name}|${dob}`;
   };
+  const taxKey = (row: Cell[]): string => {
+    const t = normTaxNo(row[taxIdx]);
+    return t === "" ? "" : norm(row[companyColIndex]) + "|" + t;
+  };
+  const empIdKey = (row: Cell[]): string => {
+    const id = norm(row[empIdIdx]);
+    return id === "" ? "" : norm(row[companyColIndex]) + "|" + id;
+  };
 
-  // Pre-count Name/DOB duplicates (per company) and email duplicates (per manager, actives only)
   outRows.forEach(row => {
     const key = nameDobKey(row);
     nameDobSeen.set(key, (nameDobSeen.get(key) || 0) + 1);
 
-    const isActive = isBlank(row[colIndex("Retire Date")]);
-    const personEmail = String(row[emailColIdx] || "").trim().toLowerCase();
-    const manager = String(row[mgrColIdx] || "").trim() || "NoEmail"; // same key as grouping below
+    const tk = taxKey(row);
+    if (tk !== "") taxSeen.set(tk, (taxSeen.get(tk) || 0) + 1);
+
+    const ek = empIdKey(row);
+    if (ek !== "") empIdSeen.set(ek, (empIdSeen.get(ek) || 0) + 1);
+
+    const isActive = isBlank(row[retireIdx]);
+    const personEmail = norm(row[emailColIdx]).toLowerCase();
+    const manager = norm(row[mgrColIdx]) || "NoEmail"; // same key as grouping below
     if (!managerEmailCounts.has(manager)) {
-      managerEmailCounts.set(manager, new Map());
+      managerEmailCounts.set(manager, new Map<string, number>());
     }
     const mgrMapRef = managerEmailCounts.get(manager)!;
     if (isActive && personEmail && personEmail !== "null") {
@@ -201,30 +289,20 @@ function main(workbook: ExcelScript.Workbook): string {
 
   const grouping = new Map<string, Record<string, Cell>[]>();
 
-  const importantCols = [
-    "Company", "Employee Id", "Surname", "Name", "Gender", "Employment Relation",
-    "Job Property", "Date of Birth", "Hire Date", "Division", "Department",
-    "Job Description", "City", "Supervisor Id", "Nominal Salary",
-    "Tax No.", "Base Salary"
-  ];
-
+  // ---------- Per-row checks ----------
   outRows.forEach(row => {
-    const managerEmail = String(row[mgrColIdx] || "").trim() || "NoEmail";
+    const managerEmail = norm(row[mgrColIdx]) || "NoEmail";
     const rec: Record<string, Cell> = {};
 
-    // Cond3: duplicate Surname|Name|Date of Birth within the same company
-    const isDuplicate = (nameDobSeen.get(nameDobKey(row)) || 0) > 1;
-
-    const retireDate = row[colIndex("Retire Date")];
+    const company = norm(row[companyColIndex]);
+    const retireDate = row[retireIdx];
     const retireCause = row[colIndex("Retire Cause")];
     const isActive = isBlank(retireDate);
 
-    // --- Cond7: Active must be consistent with Retire Date
-    // Active column already exists in data; normalize it to 0/1 if possible
+    // --- Cond7: Active flag must be consistent with Retire Date
     let activeValNum: number | null = null;
     {
-      const activeIdx = colIndex("Active");
-      const activeRaw = activeIdx >= 0 ? row[activeIdx] : null;
+      const activeRaw = row[colIndex("Active")];
       if (typeof activeRaw === "number") {
         activeValNum = activeRaw;
       } else if (typeof activeRaw === "boolean") {
@@ -241,30 +319,95 @@ function main(workbook: ExcelScript.Workbook): string {
       (isActive && activeValNum !== 1) ||
       (!isActive && activeValNum !== 0);
 
-    const missingFields = importantCols.filter(c => isBlank(row[colIndex(c)]));
+    // --- Cond1: Retire Date / Retire Cause mismatch (both)
     const cond1 =
       (!isBlank(retireDate) && isBlank(retireCause)) ||
       (isBlank(retireDate) && !isBlank(retireCause));
-    const cond2 = isActive && missingFields.length > 0;
-    const cond3 = isDuplicate;
 
-    const personEmail = String(row[emailColIdx] || "").trim().toLowerCase();
-    const jobProperty = String(row[colIndex("Job Property")] || "").trim().toUpperCase();
+    // --- Cond2: missing important field (actives only)
+    const missingFields: string[] = importantCols.filter(c => isBlank(row[colIndex(c)]));
+    const cond2 = isActive && missingFields.length > 0;
+
+    // --- Cond3: duplicate Surname|Name|DOB within the same company (both)
+    const cond3 = (nameDobSeen.get(nameDobKey(row)) || 0) > 1;
+
+    const personEmail = norm(row[emailColIdx]).toLowerCase();
+    const jobProperty = norm(row[colIndex("Job Property")]).toUpperCase();
     const isEmailValid = personEmail !== "" && personEmail !== "null";
     const mgrMapRef = managerEmailCounts.get(managerEmail);
 
-    // Cond4: duplicate email under the same manager — actives only
+    // --- Cond4: duplicate email under the same manager (actives only)
     const cond4 = isActive && isEmailValid && !!mgrMapRef && (mgrMapRef.get(personEmail) || 0) > 1;
 
-    // Cond5: ADMINISTRATIVE without email — actives only
+    // --- Cond5: ADMINISTRATIVE without email (actives only)
     const cond5 = isActive && jobProperty === "ADMINISTRATIVE" && !isEmailValid;
 
-    // Cond6: non-"alumil" email requires Mobile Phone not blank — actives only
-    const mobilePhone = String(row[colIndex("Mobile Phone")] || "").trim();
+    // --- Cond6: non-"alumil" email requires Mobile Phone (actives only)
+    const mobilePhone = norm(row[colIndex("Mobile Phone")]);
     const nonAlumil = !personEmail.includes("alumil"); // blank counts as non-alumil
     const cond6 = isActive && nonAlumil && mobilePhone === "";
 
-    const shouldInclude = cond1 || cond2 || cond3 || cond4 || cond5 || cond6 || cond7;
+    // --- Cond8: company has no manager in Table3 (both)
+    const cond8 = !mgrMap.has(company);
+
+    // --- Cond9: duplicate Tax No. within the same company (both)
+    const tk = taxKey(row);
+    const cond9 = tk !== "" && (taxSeen.get(tk) || 0) > 1;
+
+    // --- Cond10: duplicate Employee Id within the same company (both)
+    const ek = empIdKey(row);
+    const cond10 = ek !== "" && (empIdSeen.get(ek) || 0) > 1;
+
+    // --- Date checks
+    const hireS = toSerial(row[colIndex("Hire Date")]);
+    const dobS = toSerial(row[colIndex("Date of Birth")]);
+    const retireS = toSerial(retireDate);
+
+    // Cond11: Retire Date earlier than Hire Date (leavers by nature)
+    const cond11 = retireS !== null && hireS !== null && retireS < hireS;
+
+    // Cond12: Hire Date or Date of Birth in the future (both)
+    const hireFuture = hireS !== null && hireS > todaySerial;
+    const dobFuture = dobS !== null && dobS > todaySerial;
+    const cond12 = hireFuture || dobFuture;
+
+    // Cond13: age under 16 at hire (both) or over 80 today (actives only)
+    const underAgeAtHire = dobS !== null && hireS !== null && yearsBetween(dobS, hireS) < 16;
+    const over80Today = isActive && dobS !== null && yearsBetween(dobS, todaySerial) > 80;
+    const cond13 = underAgeAtHire || over80Today;
+
+    // --- Supervisor checks (blank Supervisor Id is already covered by Cond2)
+    const empId = norm(row[empIdIdx]);
+    const supId = norm(row[supIdIdx]);
+    const sameCompanyKey = company + "|" + supId;
+    let supActive: boolean | undefined = undefined;
+    if (supId !== "") {
+      supActive = empActiveByCompanyId.has(sameCompanyKey)
+        ? empActiveByCompanyId.get(sameCompanyKey)
+        : empActiveById.get(supId);
+    }
+
+    // Cond14: Supervisor Id not found as an Employee Id (actives only)
+    const cond14 = isActive && supId !== "" && supActive === undefined;
+
+    // Cond15: active employee with a supervisor who is a leaver (actives only)
+    const cond15 = isActive && supId !== "" && supActive === false;
+
+    // Cond16: employee is their own supervisor (both)
+    const cond16 = supId !== "" && empId !== "" && supId === empId;
+
+    // --- Cond17: salary zero, negative or not a number (actives only; blanks covered by Cond2)
+    const nominalRaw = row[colIndex("Nominal Salary")];
+    const baseRaw = row[colIndex("Base Salary")];
+    const nominalN = toNumber(nominalRaw);
+    const baseN = toNumber(baseRaw);
+    const badNominal = !isBlank(nominalRaw) && (isNaN(nominalN) || nominalN <= 0);
+    const badBase = !isBlank(baseRaw) && (isNaN(baseN) || baseN <= 0);
+    const cond17 = isActive && (badNominal || badBase);
+
+    const shouldInclude =
+      cond1 || cond2 || cond3 || cond4 || cond5 || cond6 || cond7 || cond8 || cond9 ||
+      cond10 || cond11 || cond12 || cond13 || cond14 || cond15 || cond16 || cond17;
 
     rec["Cond1"] = cond1;
     rec["Cond2"] = cond2;
@@ -272,7 +415,17 @@ function main(workbook: ExcelScript.Workbook): string {
     rec["Cond4"] = cond4;
     rec["Cond5"] = cond5;
     rec["Cond6"] = cond6;
-    rec["Cond7"] = cond7; // Active vs Retire Date inconsistency
+    rec["Cond7"] = cond7;
+    rec["Cond8"] = cond8;
+    rec["Cond9"] = cond9;
+    rec["Cond10"] = cond10;
+    rec["Cond11"] = cond11;
+    rec["Cond12"] = cond12;
+    rec["Cond13"] = cond13;
+    rec["Cond14"] = cond14;
+    rec["Cond15"] = cond15;
+    rec["Cond16"] = cond16;
+    rec["Cond17"] = cond17;
     rec["ShouldInclude"] = shouldInclude;
     rec["MissingFields"] = cond2 ? missingFields.join(", ") : "";
 
@@ -284,14 +437,27 @@ function main(workbook: ExcelScript.Workbook): string {
     if (cond5) reasons.push("Missing Email for ADMINISTRATIVE");
     if (cond6) reasons.push("Missing Mobile Phone for non-Alumil email");
     if (cond7) reasons.push("Active flag inconsistent with Retire Date");
+    if (cond8) reasons.push("Company has no manager in Table3");
+    if (cond9) reasons.push("Duplicate Tax No. in same Company");
+    if (cond10) reasons.push("Duplicate Employee Id in same Company");
+    if (cond11) reasons.push("Retire Date before Hire Date");
+    if (hireFuture) reasons.push("Hire Date in the future");
+    if (dobFuture) reasons.push("Date of Birth in the future");
+    if (underAgeAtHire) reasons.push("Under 16 at Hire Date");
+    if (over80Today) reasons.push("Active employee over 80 years old");
+    if (cond14) reasons.push("Supervisor Id not found");
+    if (cond15) reasons.push("Supervisor is a leaver");
+    if (cond16) reasons.push("Employee is own supervisor");
+    if (badNominal && cond17) reasons.push("Nominal Salary zero, negative or invalid");
+    if (badBase && cond17) reasons.push("Base Salary zero, negative or invalid");
     rec["Reason"] = reasons.join("; ");
 
     // Copy data columns (format dates)
-    const dateColIndices = ["Hire Date", "Retire Date", "Date of Birth"].map(col => outHeaders.indexOf(col));
+    const dateColIndices: number[] = ["Hire Date", "Retire Date", "Date of Birth"].map(col => outHeaders.indexOf(col));
     outHeaders.forEach((h, i) => {
-      let val = row[i];
+      const val = row[i];
       if (dateColIndices.includes(i) && typeof val === "number") {
-        const jsDate = new Date(Date.UTC(1899, 11, 30) + (val as number) * 86400000);
+        const jsDate = new Date(EXCEL_EPOCH + val * DAY_MS);
         rec[h] = jsDate.toISOString().slice(0, 10);
       } else {
         rec[h] = val;
@@ -317,4 +483,3 @@ function main(workbook: ExcelScript.Workbook): string {
 
   return JSON.stringify(groups);
 }
-
